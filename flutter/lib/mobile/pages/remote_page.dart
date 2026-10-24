@@ -7,6 +7,7 @@ import 'package:flutter_hbb/common/widgets/toolbar.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/mobile/widgets/floating_mouse.dart';
 import 'package:flutter_hbb/mobile/widgets/floating_mouse_widgets.dart';
+import 'package:flutter_hbb/mobile/soft_keyboard_diff.dart';
 import 'package:flutter_hbb/mobile/widgets/gesture_help.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
@@ -377,37 +378,24 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       // clipboard
       oldValue = '';
     }
-    // This length-only diff assumes the IME appends at the end. If an IME
-    // leaves the caret inside paired punctuation, later insertions can replay
-    // the closing symbol: "()" -> "(a)" sends ")" instead of "a". This is a
-    // client text-diff issue, independent of the host keyboard layout.
-    if (newValue.length == oldValue.length) {
-      // ?
-    } else if (newValue.length < oldValue.length) {
-      final char = 'VK_BACK';
-      inputModel.inputKey(char);
-    } else {
-      final content = newValue.substring(oldValue.length);
-      if (content.length > 1) {
-        if (oldValue != '' &&
-            content.length == 2 &&
-            (content == '""' ||
-                content == '()' ||
-                content == '[]' ||
-                content == '<>' ||
-                content == "{}" ||
-                content == '”“' ||
-                content == '《》' ||
-                content == '（）' ||
-                content == '【】')) {
-          // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
-          bind.sessionInputString(sessionId: sessionId, value: content);
-          _openKeyboardUnlocked();
-          return;
-        }
-        bind.sessionInputString(sessionId: sessionId, value: content);
-      } else {
-        inputChar(content);
+    final edit = diffSoftKeyboardText(oldValue, newValue);
+    for (var i = 0; i < edit.backspaces; ++i) {
+      inputModel.inputKey('VK_BACK');
+    }
+    _inputSoftKeyboardText(edit.insert);
+  }
+
+  void _inputSoftKeyboardText(String text) {
+    if (text.isEmpty) return;
+    if (text.runes.length == 1) {
+      inputChar(text);
+      return;
+    }
+    final lines = text.split('\n');
+    for (var i = 0; i < lines.length; ++i) {
+      if (i > 0) inputChar('\n');
+      if (lines[i].isNotEmpty) {
+        bind.sessionInputString(sessionId: sessionId, value: lines[i]);
       }
     }
   }
