@@ -377,37 +377,74 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       // clipboard
       oldValue = '';
     }
-    // This length-only diff assumes the IME appends at the end. If an IME
-    // leaves the caret inside paired punctuation, later insertions can replay
-    // the closing symbol: "()" -> "(a)" sends ")" instead of "a". This is a
-    // client text-diff issue, independent of the host keyboard layout.
-    if (newValue.length == oldValue.length) {
-      // ?
-    } else if (newValue.length < oldValue.length) {
-      final char = 'VK_BACK';
-      inputModel.inputKey(char);
-    } else {
-      final content = newValue.substring(oldValue.length);
-      if (content.length > 1) {
+    // Same diff algorithm as _handleIOSSoftKeyboardInput: a length-only diff
+    // misses in-place IME edits (e.g. Vietnamese Telex "oo" -> "ô"), so compare
+    // the tails after the last '1' marker instead.
+    var i = newValue.length - 1;
+    for (; i >= 0 && newValue[i] != '1'; --i) {}
+    var j = oldValue.length - 1;
+    for (; j >= 0 && oldValue[j] != '1'; --j) {}
+    if (i < j) j = i;
+    var subNewValue = newValue.substring(j + 1);
+    var subOldValue = oldValue.substring(j + 1);
+
+    // get common prefix of subNewValue and subOldValue
+    var common = 0;
+    for (;
+        common < subOldValue.length &&
+            common < subNewValue.length &&
+            subNewValue[common] == subOldValue[common];
+        ++common) {}
+
+    // get newStr from subNewValue
+    var newStr = "";
+    if (subNewValue.length > common) {
+      newStr = subNewValue.substring(common);
+    }
+
+    // Set the value to the old value and early return if is still composing. (1 && 2)
+    // 1. The composing range is valid
+    // 2. The new string is shorter than the composing range.
+    if (_textController.value.isComposingRangeValid) {
+      final composingLength = _textController.value.composing.end -
+          _textController.value.composing.start;
+      if (composingLength > newStr.length) {
+        _value = oldValue;
+        return;
+      }
+    }
+
+    // Delete the different part in the old value.
+    for (i = 0; i < subOldValue.length - common; ++i) {
+      inputModel.inputKey('VK_BACK');
+    }
+
+    // Input the new string.
+    if (newStr.isNotEmpty) {
+      if (newStr.length > 1) {
         if (oldValue != '' &&
-            content.length == 2 &&
-            (content == '""' ||
-                content == '()' ||
-                content == '[]' ||
-                content == '<>' ||
-                content == "{}" ||
-                content == '”“' ||
-                content == '《》' ||
-                content == '（）' ||
-                content == '【】')) {
+            newStr.length == 2 &&
+            (newStr == '""' ||
+                newStr == '()' ||
+                newStr == '[]' ||
+                newStr == '<>' ||
+                newStr == "{}" ||
+                newStr == '”“' ||
+                newStr == '《》' ||
+                newStr == '（）' ||
+                newStr == '【】')) {
           // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
-          bind.sessionInputString(sessionId: sessionId, value: content);
+          bind.sessionInputString(sessionId: sessionId, value: newStr);
           _openKeyboardUnlocked();
           return;
         }
-        bind.sessionInputString(sessionId: sessionId, value: content);
+        bind.sessionInputString(sessionId: sessionId, value: newStr);
+      } else if (newStr.codeUnitAt(0) > 127) {
+        // A single non-ASCII char (e.g. a composed Vietnamese letter) cannot be
+        // sent as a raw key code; send it as a unicode string instead.
+        bind.sessionInputString(sessionId: sessionId, value: newStr);
       } else {
-        inputChar(content);
+        inputChar(newStr);
       }
     }
   }
